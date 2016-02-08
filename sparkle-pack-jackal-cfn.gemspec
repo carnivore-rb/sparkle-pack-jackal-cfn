@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = 'sparkle-pack-jackal-cfn'
-  s.version = '0.1.0'
+  s.version = '0.1.1'
   s.summary = 'Jackal CFN compute stacker'
   s.author = 'Chris Roberts'
   s.email = 'chrisroberts.code@gmail.com'
