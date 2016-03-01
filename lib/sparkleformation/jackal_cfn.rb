@@ -19,6 +19,17 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
       type 'CommaDelimitedList'
       default 'none'
     end
+    stacks_enabled do
+      type 'String'
+      default 'false'
+    end
+  end
+
+  conditions do
+    stacks_enabled equals!(
+      ref!(:stacks_enabled),
+      'true'
+    )
   end
 
   mappings do
@@ -78,7 +89,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
 
   dynamic!(:ec2_security_group, :jackal) do
     properties do
-      group_description 'Jackal compute security group'
+      group_description join!(stack_name!, ' - Jackal compute security group')
       vpc_id if!(:vpc_enabled, ref!(:networking_vpc_id), no_value!)
       security_group_ingress array!(
         ->{
@@ -99,12 +110,47 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         policy_document.statement array!(
           ->{
             effect 'Allow'
-            action '*'
+            action [
+              'ec2:RegisterImage',
+              'ec2:DeregisterImage',
+              'ec2:DescribeImages',
+              'ec2:StopInstances',
+              'ec2:CreateImage'
+            ]
             resource '*'
+          },
+          ->{
+            effect 'Allow'
+            action 'ec2:TerminateInstances'
+            resource join!('arn:aws:ec2:', region!, ':', account_id!, ':instance/*')
+            condition.string_equals.set!('ec2:ResourceTag/stack_id', stack_id!)
+          },
+          ->{
+            effect 'Allow'
+            action 'sqs:*'
+            resource attr!(:jackal_sqs_queue, :arn)
           }
         )
       }
     )
+  end
+
+  dynamic!(:iam_policy, :stacks) do
+    on_condition! :stacks_enabled
+    properties do
+      users [ref!(:jackal_iam_user)]
+      policy_name 'stacks-access'
+      policy_document.statement array!(
+        ->{
+          effect 'Allow'
+          action 'cloudformation:*'
+        },
+        ->{
+          effect 'Allow'
+          action 'iam:*'
+        }
+      )
+    end
   end
 
   dynamic!(:iam_access_key, :jackal).properties.user_name ref!(:jackal_iam_user)
@@ -231,7 +277,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
           command 'apt-get install -qy ruby2.2 ruby2.2-dev libyajl-dev build-essential libcurl3-dev libxslt1-dev libxml2 zlib1g-dev awscli'
         end
         commands('06_jackal_install') do
-          command 'gem install --no-document jackal-cfn carnivore-sqs'
+          command 'gem install --no-document jackal-cfn carnivore-sqs bundler'
         end
         commands('07_jackal_startup') do
           command '/etc/init.d/jackal start'
