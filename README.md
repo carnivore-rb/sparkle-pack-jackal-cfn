@@ -28,6 +28,7 @@ This [SparklePack][2] includes 3 templates:
 1. `jackal_cfn` - Creates a working processor to handle requests
 2. `jackal_bus` - Creates _only_ the required message bus resources
 3. `jackal_usage_example` - Example template to display usage of the OrchestrationUnit resource
+4. `jackal_nellie` - Inherits the `jackal_cfn` template and adds nellie
 
 _NOTE: The `jackal_cfn` template only supports the follow regions:_
 
@@ -115,6 +116,18 @@ And create the nested stacks:
 ```
 $ bundle exec sfn create STACK_NAME_ALL --file full_stack
 ```
+
+### Jackal Nellie
+
+The `jackal_nellie` template inherits the `jackal_cfn` template and adds job
+queue specific for the nellie service. It also adds `jackal-code-fetcher`, `jackal-nellie`,
+`jackal-github`, `jackal-slack`, and `jackal-github-kit` services to the processor. The
+`jackal_nellie` stack will provide outputs with a nellie SQS endpoint and remote user
+credentials. These can be used to create a GitHub service and allow a repository to send
+push notifications to be processed by nellie. Requirements when creating the stack:
+
+* GitHub API token (for code fetching and commenting)
+* Slack Webhook (for notification)
 
 ## Info
 
