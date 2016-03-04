@@ -1,5 +1,4 @@
 SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
-
   ec2_required_info = [:image_id, :key_name, :instance_type]
 
   ec2_required_info.each do |req_value|
@@ -8,46 +7,46 @@ SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
     end
   end
 
-  unless(opts[:service_token])
-    parameters.jackal_service_token.type 'String'
-  end
+  dynamic!(:jackal_token_validator, name, args)
 
-  base_instance = dynamic!(:ec2_instance, "#{name}_jackal_image".to_sym) do
-    properties do
-      ec2_required_info.each do |req_value|
-        set!(req_value, opts.fetch(req_value, ref!("#{name}_#{req_value}".to_sym)))
-      end
-      if(opts[:user_data])
-        user_data opts[:user_data]
-      else
-        user_data base64!(
-          join!(
-            "#!/bin/bash\n",
-            "apt-get update\n",
-            "apt-get -y install python-setuptools\n",
-            "easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
-            '/usr/local/bin/cfn-init -v --region ',
-            region!,
-            ' -s ',
-            stack_name!,
-            " -r #{resource_name!}\n",
-            "cfn-signal -e $? -r 'Provision complete' --resource #{resource_name!} --region ",
-            region!,
-            ' --stack ',
-            stack_name!
+  unless(opts[:image_instance_id])
+    base_instance = dynamic!(:ec2_instance, "#{name}_jackal_image".to_sym) do
+      properties do
+        ec2_required_info.each do |req_value|
+          set!(req_value, opts.fetch(req_value, ref!("#{name}_#{req_value}".to_sym)))
+        end
+        if(opts[:user_data])
+          user_data opts[:user_data]
+        else
+          user_data base64!(
+            join!(
+              "#!/bin/bash\n",
+              "apt-get update\n",
+              "apt-get -y install python-setuptools\n",
+              "easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
+              '/usr/local/bin/cfn-init -v --region ',
+              region!,
+              ' -s ',
+              stack_name!,
+              " -r #{resource_name!}\n",
+              "cfn-signal -e $? -r 'Provision complete' --resource #{resource_name!} --region ",
+              region!,
+              ' --stack ',
+              stack_name!
+            )
           )
-        )
+        end
       end
-    end
-    unless(opts[:user_data])
-      creation_policy.resource_signal do
-        count 1
-        timeout 'PT30M'
+      unless(opts[:user_data])
+        creation_policy.resource_signal do
+          count 1
+          timeout 'PT30M'
+        end
       end
     end
   end
 
-  resources.set!("#{name}_jackal_image".to_sym) do
+  image_resource = resources.set!("#{name}_jackal_image".to_sym) do
     type 'Custom::AmiRegister'
     properties do
       service_token opts.fetch(:service_token, ref!(:jackal_service_token))
@@ -58,7 +57,6 @@ SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
             :image_instance_id,
             ref!("#{name}_jackal_image_ec2_instance".to_sym)
           ),
-          stack_name!,
           :options => {
             :delimiter => '-'
           }
@@ -79,6 +77,6 @@ SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
 
   outputs.set!("#{name}_ami_id".to_sym).value attr!("#{name}_jackal_image", :ami_id)
 
-  base_instance
+  opts[:image_instance_id] ? image_resource : base_instance
 
 end
