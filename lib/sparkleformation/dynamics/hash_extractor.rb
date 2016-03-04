@@ -1,4 +1,5 @@
 SparkleFormation.dynamic(:hash_extractor) do |name, args={}|
+  dynamic!(:jackal_token_validator, name, args)
   resources.set!("#{name}_hash_extractor".to_sym) do
     type 'Custom::HashExtractor'
     properties do

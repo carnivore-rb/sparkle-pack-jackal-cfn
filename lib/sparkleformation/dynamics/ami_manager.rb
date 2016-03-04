@@ -1,4 +1,5 @@
 SparkleFormation.dynamic(:ami_manager) do |name, args={}|
+  dynamic!(:jackal_token_validator, name, args)
   resources.set!("#{name}_ami_manager".to_sym) do
     type 'Custom::AmiManager'
     properties do

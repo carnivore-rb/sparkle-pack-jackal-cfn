@@ -1,4 +1,5 @@
 SparkleFormation.dynamic(:jackal_stack) do |name, args={}|
+  dynamic!(:jackal_token_validator, name, args)
   resources.set!("#{name}_jackal_stack".to_sym) do
     type 'Custom::JackalStack'
     properties do

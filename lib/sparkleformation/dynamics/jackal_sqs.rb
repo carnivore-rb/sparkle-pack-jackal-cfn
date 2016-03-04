@@ -10,6 +10,7 @@ SparkleFormation.dynamic(:jackal_sqs) do |name, args={}|
           protocol 'sqs'
         }
       )
+      depends_on!("#{name}_sqs_queue".to_sym)
     end
   end
 
