@@ -102,38 +102,59 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
     end
   end
 
-  dynamic!(:iam_user, :jackal) do
+  dynamic!(:iam_user, :jackal)
+
+  dynamic!(:iam_role, :jackal) do
     properties do
+      assume_role_policy_document do
+        version '2012-10-17'
+        statement array!(
+          ->{
+            effect 'Allow'
+            principal.service ['ec2.amazonaws.com']
+            action ['sts:AssumeRole']
+          }
+        )
+      end
       path '/'
-      policies array!(
+    end
+  end
+
+  dynamic!(:iam_policy, :jackal) do
+    properties do
+      policy_name 'service-access'
+      policy_document.statement array!(
         ->{
-          policy_name 'service-access'
-          policy_document.statement array!(
-            ->{
-              effect 'Allow'
-              action [
-                'ec2:RegisterImage',
-                'ec2:DeregisterImage',
-                'ec2:DescribeImages',
-                'ec2:StopInstances',
-                'ec2:CreateImage'
-              ]
-              resource '*'
-            },
-            ->{
-              effect 'Allow'
-              action 'ec2:TerminateInstances'
-              resource join!('arn:aws:ec2:', region!, ':', account_id!, ':instance/*')
-              condition.string_equals.set!('ec2:ResourceTag/StackId', stack_id!)
-            },
-            ->{
-              effect 'Allow'
-              action 'sqs:*'
-              resource attr!(:jackal_sqs_queue, :arn)
-            }
-          )
+          effect 'Allow'
+          action [
+            'ec2:RegisterImage',
+            'ec2:DeregisterImage',
+            'ec2:DescribeImages',
+            'ec2:StopInstances',
+            'ec2:CreateImage'
+          ]
+          resource '*'
+        },
+        ->{
+          effect 'Allow'
+          action 'ec2:TerminateInstances'
+          resource join!('arn:aws:ec2:', region!, ':', account_id!, ':instance/*')
+          condition.string_equals.set!('ec2:ResourceTag/StackId', stack_id!)
+        },
+        ->{
+          effect 'Allow'
+          action 'ec2:TerminateInstances'
+          resource join!('arn:aws:ec2:', region!, ':', account_id!, ':instance/*')
+          condition.string_equals.set!('ec2:ResourceTag/StackId', stack_id!)
+        },
+        ->{
+          effect 'Allow'
+          action 'sqs:*'
+          resource attr!(:jackal_sqs_queue, :arn)
         }
       )
+      users [ref!(:jackal_iam_user)]
+      roles [ref!(:jackal_iam_role)]
     end
   end
 
@@ -141,6 +162,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
     on_condition! :stacks_enabled
     properties do
       users [ref!(:jackal_iam_user)]
+      roles [ref!(:jackal_iam_role)]
       policy_name 'stacks-access'
       policy_document.statement array!(
         ->{
@@ -157,13 +179,19 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
 
   dynamic!(:iam_access_key, :jackal).properties.user_name ref!(:jackal_iam_user)
 
+  dynamic!(:iam_instance_profile, :jackal).properties do
+    path '/'
+    roles [ref!(:jackal_iam_role)]
+  end
+
   dynamic!(:jackal_image, :jackal_cfn,
     :image_id => if!(:vpc_enabled, map!(:config, region!, :vpc_ami_id), map!(:config, region!, :classic_ami_id)),
     :instance_type => if!(:vpc_enabled, map!(:config, 'Flavor', :vpc), map!(:config, 'Flavor', :classic)),
-    :service_token => ref!(:jackal_sns_topic)
+    :jackal_service_token => ref!(:jackal_sns_topic)
   ) do
     properties do
       security_groups if!(:vpc_enabled, no_value!, [ref!(:jackal_ec2_security_group)])
+      iam_instance_profile ref!(:jackal_iam_instance_profile)
       network_interfaces if!(
         :vpc_enabled,
         array!(
@@ -261,7 +289,6 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
               }
             )
           )
-          ignoreErrors 'true'
         end
         commands('02_software_properties_old') do
           command 'apt-get install -yq python-software-properties'
@@ -316,10 +343,12 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
 
   dynamic!(:auto_scaling_launch_configuration, :jackal) do
     properties do
+      associate_public_ip_address if!(:vpc_enabled, true, false)
       image_id attr!(:jackal_cfn_jackal_image, :ami_id)
       key_name ref!(:jackal_cfn_key_name)
       instance_monitoring false
       instance_type if!(:vpc_enabled, map!(:config, 'Flavor', :vpc), map!(:config, 'Flavor', :classic))
+      iam_instance_profile ref!(:jackal_iam_instance_profile)
       security_groups [ref!(:jackal_ec2_security_group)]
       user_data base64!(
         join!(
@@ -338,16 +367,9 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         files('/usr/local/bin/suicider') do
           content join!(
             "#!/bin/bash\n",
-            "while true\ndo\nsleep 3500\n",
-            "tail -n 1 /opt/jackal/run.log | grep 'no message received'\n",
-            "if [ $? -eq 0 ]\nthen\n",
-            'AWS_ACCESS_KEY_ID="',
-            ref!(:jackal_iam_access_key),
-            '" AWS_SECRET_ACCESS_KEY="',
-            attr!(:jackal_iam_access_key, :secret_access_key),
-            '" aws autoscaling terminate-instance-in-autoscaling-group --should-decrement-desired-capacity --instance-id `curl -s http://169.254.169.254/latest/meta-data/instance-id` --region ',
+            '"aws autoscaling terminate-instance-in-auto-scaling-group --should-decrement-desired-capacity --instance-id `curl -s http://169.254.169.254/latest/meta-data/instance-id` --region ',
             region!,
-            "\nexit 0\nfi\ndone\n"
+            "\nexit 0\n"
           )
           mode '000700'
         end
@@ -361,7 +383,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
     end
   end
 
-  dynamic!(:auto_scaling_group, :jackal) do
+  asg_resource = dynamic!(:auto_scaling_auto_scaling_group, :jackal, :resource_name_suffix => :auto_scaling_group) do
     properties do
       cooldown 500
       max_size ref!(:jackal_max_cluster_size)
@@ -374,6 +396,21 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
           key 'StackId'
           value stack_id!
           propagate_at_launch true
+        }
+      )
+    end
+  end
+
+  dynamic!(:iam_policy, :jackal_asg) do
+    properties do
+      users [ref!(:jackal_iam_user)]
+      roles [ref!(:jackal_iam_role)]
+      policy_name 'ASG-modifier-access'
+      policy_document.statement array!(
+        ->{
+          effect 'Allow'
+          action 'autoscaling:TerminateInstanceInAutoScalingGroup'
+          resource join!('arn:aws:autoscaling:', region!, ':', account_id!, ':autoscalinggroup:*:autoscalinggroupname/', ref!(asg_resource.resource_name!))
         }
       )
     end
@@ -413,9 +450,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
     type 'Custom::AmiManager'
     depends_on!(
       :jackal_cloud_watch_alarm,
-      :jackal_sqs_queue_policy,
-      :jackal_auto_scaling_scaling_policy,
-      :jackal_auto_scaling_group
+      :jackal_sqs_queue_policy
     )
     properties do
       service_token ref!(:jackal_sns_topic)
@@ -424,6 +459,11 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         region region!
       end
     end
+  end
+
+  outputs do
+    jackal_iam_user.value ref!(:jackal_iam_user)
+    jackal_iam_role.value ref!(:jackal_iam_role)
   end
 
 end
