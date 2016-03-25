@@ -7,7 +7,7 @@ SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
     end
   end
 
-  dynamic!(:jackal_token_validator, name, args)
+  dynamic!(:jackal_token_validator, name, opts)
 
   unless(opts[:image_instance_id])
     base_instance = dynamic!(:ec2_instance, "#{name}_jackal_image".to_sym) do
@@ -49,7 +49,7 @@ SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
   image_resource = resources.set!("#{name}_jackal_image".to_sym) do
     type 'Custom::AmiRegister'
     properties do
-      service_token opts.fetch(:service_token, ref!(:jackal_service_token))
+      service_token opts.fetch(:jackal_service_token, ref!(:jackal_service_token))
       parameters do
         name join!(
           "jackal-image-#{name}",
