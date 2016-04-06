@@ -32,58 +32,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
     )
   end
 
-  mappings do
-    config do
-      flavor do
-        classic 'm1.small'
-        vpc 't2.micro'
-      end
-      set!('ap-northeast-1'.disable_camel!) do
-        classic_ami_id 'ami-d5665cbb'
-        vpc_ami_id 'ami-41675d2f'
-      end
-      set!('ap-southeast-1'.disable_camel!) do
-        classic_ami_id 'ami-5a6fa039'
-        vpc_ami_id 'ami-5e6ea13d'
-      end
-      set!('ap-southeast-2'.disable_camel!) do
-        classic_ami_id 'ami-d2d8fcb1'
-        vpc_ami_id 'ami-8cdafeef'
-      end
-      set!('cn-north-1'.disable_camel!) do
-        classic_ami_id 'ami-d97db4b4'
-        vpc_ami_id 'ami-3378b15e'
-      end
-      set!('eu-central-1'.disable_camel!) do
-        classic_ami_id 'ami-15f6ee79'
-        vpc_ami_id 'ami-acf4ecc0'
-      end
-      set!('sa-east-1'.disable_camel!) do
-        classic_ami_id 'ami-6219990e'
-        vpc_ami_id 'ami-1c1b9b70'
-      end
-      set!('eu-west-1'.disable_camel!) do
-        classic_ami_id 'ami-6d70c61e'
-        vpc_ami_id 'ami-bf72c4cc'
-      end
-      set!('us-east-1'.disable_camel!) do
-        classic_ami_id 'ami-59d6f933'
-        vpc_ami_id 'ami-20d3fc4a'
-      end
-      set!('us-west-1'.disable_camel!) do
-        classic_ami_id 'ami-cd2056ad'
-        vpc_ami_id 'ami-842355e4'
-      end
-      set!('us-west-2'.disable_camel!) do
-        classic_ami_id 'ami-a1c721c1'
-        vpc_ami_id 'ami-25c52345'
-      end
-      set!('us-gov-west-1'.disable_camel!) do
-        classic_ami_id 'ami-ecbbd9cf'
-        vpc_ami_id 'ami-d6bbd9f5'
-      end
-    end
-  end
+  registry!(:image_ids)
 
   conditions.vpc_enabled not!(equals!(ref!(:networking_vpc_id), 'none'))
 
@@ -134,12 +83,6 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
             'ec2:CreateImage'
           ]
           resource '*'
-        },
-        ->{
-          effect 'Allow'
-          action 'ec2:TerminateInstances'
-          resource join!('arn:aws:ec2:', region!, ':', account_id!, ':instance/*')
-          condition.string_equals.set!('ec2:ResourceTag/StackId', stack_id!)
         },
         ->{
           effect 'Allow'
@@ -204,7 +147,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         ),
         []
       )
-      tags!(:stack_id => stack_id!)
+      tags!('StackId' => stack_id!)
     end
     metadata('AWS::CloudFormation::Init') do
       camel_keys_set!(:auto_disable)
@@ -273,6 +216,9 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
           content.set!('OriginStack', stack_id!)
         end
         users.jackal.homeDir '/opt/jackal'
+        commands('00_apt_update') do
+          command 'apt-get update -q'
+        end
         commands('00_ntp_sync') do
           command 'apt-get install ntpdate -qy && ntpdate -b -s pool.ntp.org'
         end
@@ -290,33 +236,19 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
             )
           )
         end
-        commands('02_software_properties_old') do
-          command 'apt-get install -yq python-software-properties'
-          ignoreErrors 'true'
+        commands('03_required_packages_install') do
+          command 'apt-get install -qy ruby ruby-dev libssl-dev libyajl-dev build-essential libcurl3-dev libxslt1-dev libxml2 zlib1g-dev awscli jq'
         end
-        commands('02_software_properties_new') do
-          command 'apt-get install -yq software-properties-common'
-          ignoreErrors 'true'
-        end
-        commands('03_add_repository') do
-          command 'apt-add-repository ppa:brightbox/ruby-ng -y'
-        end
-        commands('04_apt_reupdate') do
-          command 'apt-get update'
-        end
-        commands('05_ruby_install') do
-          command 'apt-get install -qy ruby2.2 ruby2.2-dev libyajl-dev build-essential libcurl3-dev libxslt1-dev libxml2 zlib1g-dev awscli'
-        end
-        commands('06_jackal_install') do
+        commands('04_jackal_install') do
           command 'gem install --no-document jackal-cfn carnivore-sqs bundler'
         end
-        commands('07_jackal_startup') do
+        commands('05_jackal_startup') do
           command '/etc/init.d/jackal start'
         end
-        commands('08_pause_for_file_stabilization') do
+        commands('06_pause_for_file_stabilization') do
           command 'sleep 180'
         end
-        commands('09_notify_complete') do
+        commands('07_notify_complete') do
           command join!(
             "cfn-signal -e 0 -r 'Provision complete' --resource #{resource_name!} --region ",
             region!,
@@ -324,10 +256,10 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
             stack_name!
           )
         end
-        commands('10_pause_for_dramatic_effect') do
+        commands('08_pause_for_dramatic_effect') do
           command 'sleep 3500'
         end
-        commands('11_kill_self') do
+        commands('09_kill_self') do
           command join!(
             'aws ec2 terminate-instances --instance-ids `curl -s http://169.254.169.254/latest/meta-data/instance-id` --region ',
             region!
@@ -366,7 +298,8 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
       config do
         files('/usr/local/bin/suicider') do
           content join!(
-            "#!/bin/bash\n",
+            "#!/bin/bash\nsleep 3550\n",
+            'until [ "$(expr $(date +%s) - 300)" -gt "$(date +%s -r /opt/jackal/run.log)" ]; do sleep 3550; done',
             '"aws autoscaling terminate-instance-in-auto-scaling-group --should-decrement-desired-capacity --instance-id `curl -s http://169.254.169.254/latest/meta-data/instance-id` --region ',
             region!,
             "\nexit 0\n"
@@ -410,7 +343,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         ->{
           effect 'Allow'
           action 'autoscaling:TerminateInstanceInAutoScalingGroup'
-          resource join!('arn:aws:autoscaling:', region!, ':', account_id!, ':autoscalinggroup:*:autoscalinggroupname/', ref!(asg_resource.resource_name!))
+          resource '*'
         }
       )
     end
