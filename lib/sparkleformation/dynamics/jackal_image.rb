@@ -1,15 +1,16 @@
 SparkleFormation.dynamic(:jackal_image) do |name, opts={}|
   ec2_required_info = [:image_id, :key_name, :instance_type]
 
-  ec2_required_info.each do |req_value|
-    unless(opts[req_value])
-      parameters.set!("#{name}_#{req_value}".to_sym).type 'String'
-    end
-  end
-
   dynamic!(:jackal_token_validator, name, opts)
 
   unless(opts[:image_instance_id])
+
+    ec2_required_info.each do |req_value|
+      unless(opts[req_value])
+        parameters.set!("#{name}_#{req_value}".to_sym).type 'String'
+      end
+    end
+
     base_instance = dynamic!(:ec2_instance, "#{name}_jackal_image".to_sym) do
       properties do
         ec2_required_info.each do |req_value|
