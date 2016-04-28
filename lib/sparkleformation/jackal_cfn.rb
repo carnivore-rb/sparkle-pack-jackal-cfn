@@ -92,6 +92,11 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         },
         ->{
           effect 'Allow'
+          action 'autoscaling:TerminateInstanceInAutoScalingGroup'
+          resource '*'
+        },
+        ->{
+          effect 'Allow'
           action 'sqs:*'
           resource attr!(:jackal_sqs_queue, :arn)
         }
@@ -300,7 +305,8 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
           content join!(
             "#!/bin/bash\nsleep 3550\n",
             'until [ "$(expr $(date +%s) - 300)" -gt "$(date +%s -r /opt/jackal/run.log)" ]; do sleep 3550; done',
-            '"aws autoscaling terminate-instance-in-auto-scaling-group --should-decrement-desired-capacity --instance-id `curl -s http://169.254.169.254/latest/meta-data/instance-id` --region ',
+            "\n",
+            'aws autoscaling terminate-instance-in-auto-scaling-group --should-decrement-desired-capacity --instance-id `curl -s http://169.254.169.254/latest/meta-data/instance-id` --region ',
             region!,
             "\nexit 0\n"
           )
@@ -310,7 +316,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
           command '/etc/init.d/jackal start'
         end
         commands('01_suicider') do
-          command 'nohup bash -c /usr/local/bin/suicider &'
+          command 'at -f /usr/local/bin/suicider now'
         end
       end
     end
@@ -332,21 +338,7 @@ SparkleFormation.new(:jackal_cfn, :inherit => :jackal_bus) do
         }
       )
     end
-  end
-
-  dynamic!(:iam_policy, :jackal_asg) do
-    properties do
-      users [ref!(:jackal_iam_user)]
-      roles [ref!(:jackal_iam_role)]
-      policy_name 'ASG-modifier-access'
-      policy_document.statement array!(
-        ->{
-          effect 'Allow'
-          action 'autoscaling:TerminateInstanceInAutoScalingGroup'
-          resource '*'
-        }
-      )
-    end
+    update_policy.auto_scaling_rolling_update.max_batch_size 1
   end
 
   dynamic!(:auto_scaling_scaling_policy, :jackal) do
